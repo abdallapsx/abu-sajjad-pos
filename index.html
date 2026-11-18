@@ -324,6 +324,7 @@ const SEED_ITEMS=[
 [9,'سلطة خضراء',2000,0,'🥗',''],[9,'حمص',2500,0,'🥣',''],[9,'طرشي وعمبة',1000,0,'🥒',''],[9,'خبز',500,0,'🍞',''],[9,'بطاطا مقلية',2000,0,'🍟',''],
 [10,'ماء',500,0,'💧',''],[10,'بيبسي',750,0,'🥤',''],[10,'لبن / شنينة',1000,0,'🥛',''],[10,'عصير',2500,0,'🧃',''],[10,'شاي',500,0,'🍵','']];
 const MENU_VER=2;
+const APP_VER='2.3.0';
 const WEIGHTS=Array.from({length:20},(_,i)=>(i+1)/2); // 0.5 → 10 كغ
 /* ---------------- State ---------------- */
 let S={settings:null,users:[],cats:[],items:[]};
@@ -378,7 +379,7 @@ async function renderLogin(){
   $('#app').innerHTML=`<div class="login"><button class="kbtn ${VK.auto?'on':''}" id="kbT" onclick="vkToggle()">⌨️ الكيبورد</button><div class="lcard">
    <div class="lg">${S.settings.logo?`<img src="${S.settings.logo}">`:'🐟'}</div>
    <h1>${esc(S.settings.name)}</h1><div class="sl">نظام الكاشير وإدارة المبيعات</div>
-   <form id="lf"><label class="f">اسم المستخدم<input id="lu" autofocus autocomplete="off"></label>
+   <form id="lf"><label class="f">اسم المستخدم<input id="lu" name="x-login-code" autofocus autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true"></label>
    <label class="f">كلمة المرور<input id="lp" class="pw" autocomplete="off" autocorrect="off" spellcheck="false"></label>
    <button class="btn gold" style="padding:13px;font-size:17px;margin-top:6px">🔐 تسجيل الدخول</button>
    ${def?`<div class="hint">الدخول الأول: <b>admin</b> / <b>admin123</b> — غيّرها من الإدارة</div>`:''}</form>
@@ -755,7 +756,7 @@ function admUsers(){
 function editUser(id){const u=id?{...S.users.find(x=>x.id===id)}:{id:uid(),name:'',username:'',pass:'',role:'cashier',active:true};
   modal(`<h3>${id?'تعديل موظف':'موظف جديد'}</h3><div class="form">
    <label class="f">اسم الموظف<input id="uN" value="${esc(u.name)}" autofocus></label>
-   <label class="f">اسم المستخدم (يوزر)<input id="uU" value="${esc(u.username)}" dir="ltr" autocomplete="off"></label>
+   <label class="f">اسم المستخدم (يوزر)<input id="uU" name="x-staff-code" value="${esc(u.username)}" dir="ltr" autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true"></label>
    <label class="f">كلمة المرور ${id?'<small>(اتركها فارغة لعدم التغيير)</small>':''}<input id="uP" class="pw" dir="ltr" autocomplete="off" spellcheck="false"></label>
    <label class="f">تأكيد كلمة المرور<input id="uP2" class="pw" dir="ltr" autocomplete="off" spellcheck="false"></label>
    <label class="f">الصلاحية<select id="uR"><option value="cashier" ${u.role==='cashier'?'selected':''}>كاشير</option><option value="admin" ${u.role==='admin'?'selected':''}>مدير</option></select></label>
@@ -810,7 +811,7 @@ function admBackup(){
     <div class="form"><label class="f full">مجلد النسخ الاحتياطي<div style="display:flex;gap:8px"><input id="bkDir" value="${esc(DESK.info.backupDir)}" dir="ltr" style="text-align:left;unicode-bidi:plaintext"><button class="btn sea" onclick="pickBkDir()">📁 اختيار</button><button class="btn gold" onclick="saveBkDir()">💾 حفظ</button></div></label>
     <div class="full" id="bkInfo" class="mut"></div>
     <label class="chk full"><input type="checkbox" id="kioskP" ${DESK.info.kioskPrint?'checked':''} onchange="saveKiosk(this.checked)"> طباعة الفاتورة مباشرة على الطابعة الافتراضية بدون نافذة الطباعة (يتفعّل بعد إعادة تشغيل البرنامج)</label></div>
-    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn gold" onclick="backupNow(false)">💾 نسخة احتياطية الآن</button><button class="btn" onclick="fetch('/api/openfolder',{method:'POST'})">📂 فتح المجلد</button><button class="btn sea" onclick="offerRestoreLatest(false)">⟲ استرجاع آخر نسخة من المجلد</button></div></div>`:''}
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn gold" onclick="backupNow(false)">💾 نسخة احتياطية الآن</button><button class="btn" onclick="fetch('/api/openfolder',{method:'POST'}).catch(deskDown)">📂 فتح المجلد</button><button class="btn sea" onclick="offerRestoreLatest(false)">⟲ استرجاع آخر نسخة من المجلد</button></div></div>`:''}
    <div class="grid2">
    <div class="box"><h3>⬇️ ${DESK.on?'تنزيل نسخة في ملف':'أخذ نسخة احتياطية'}</h3><p class="mut" style="line-height:1.8;margin-bottom:12px">يحفظ كل البيانات (الأقسام، الأصناف، الأسعار، المستخدمين، الإعدادات، وكل الفواتير) في ملف واحد. يُنصح بأخذ نسخة يومياً وحفظها على فلاش أو في مكان آمن.</p>
     <button class="btn gold" onclick="exportData()">💾 تنزيل نسخة احتياطية</button></div>
@@ -818,7 +819,7 @@ function admBackup(){
     <label class="btn sea">📂 اختيار ملف النسخة<input type="file" accept=".json" id="impF" hidden></label></div>
    <div class="box"><h3>🧹 تصفير الفواتير</h3><p class="mut" style="line-height:1.8;margin-bottom:12px">حذف جميع الفواتير وإعادة الترقيم من 1 (مع الإبقاء على الأقسام والأصناف والمستخدمين). خذ نسخة احتياطية أولاً.</p>
     <button class="btn danger" onclick="wipeInv()">حذف كل الفواتير</button></div>
-   <div class="box"><h3>ℹ️ معلومات</h3><p class="mut" style="line-height:1.9">الإصدار 2.0 ${DESK.on?'(نسخة سطح المكتب)':'(نسخة الويب)'}<br>عدد الأقسام: ${S.cats.length} — الأصناف: ${S.items.length} — المستخدمين: ${S.users.length}<br>رقم الفاتورة القادمة: ${S.settings.nextNo}</p></div></div>`;
+   <div class="box"><h3>ℹ️ معلومات</h3><p class="mut" style="line-height:1.9">الإصدار ${APP_VER} ${DESK.on?'(نسخة سطح المكتب '+esc(DESK.info.version||'')+')':'(نسخة الويب)'}<br>عدد الأقسام: ${S.cats.length} — الأصناف: ${S.items.length} — المستخدمين: ${S.users.length}<br>رقم الفاتورة القادمة: ${S.settings.nextNo}</p></div></div>`;
   $('#impF').onchange=e=>{const f=e.target.files[0];if(f)importData(f)};updBkStatus()}
 async function exportData(){const data={app:'AbuSajjadPOS',v:1,at:Date.now(),settings:S.settings,users:S.users,cats:S.cats,items:S.items,invoices:await DB.allInv()};
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));
@@ -851,17 +852,18 @@ async function backupNow(silent=true){
   try{const r=await fetch('/api/backup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(await snapshot())});
     const j=await r.json();if(!j.ok)throw new Error(j.error||'خطأ');DESK.info.lastBackup=j.time;DESK.info.hasLatest=true;DESK.err='';
     if(!silent)toast('✔ تم حفظ نسخة احتياطية في: '+j.dir,'ok');return true}
-  catch(e){DESK.err=e.message||'تعذر الاتصال';toast('⚠️ فشل النسخ الاحتياطي: '+DESK.err,'err');return false}
+  catch(e){DESK.err=(e.message==='Failed to fetch'?'خدمة البرنامج متوقفة — أعد فتح البرنامج':e.message)||'تعذر الاتصال';toast('⚠️ فشل النسخ الاحتياطي: '+DESK.err,'err');return false}
   finally{bkBusy=false;updBkStatus()}
 }
+function deskDown(){toast('⚠️ خدمة البرنامج متوقفة — سكّر النافذة وافتح البرنامج من الأيقونة مرة ثانية','err')}
 function updBkStatus(){
   const el=$('#bkst');if(el&&DESK.on){const t=DESK.info.lastBackup?new Date(DESK.info.lastBackup):null;
     el.className='bkst'+(DESK.err?' bad':'');el.innerHTML=DESK.err?'<i></i>النسخ الاحتياطي متوقف':`<i></i>نسخة احتياطية ${t?time12(t):'—'}`}
   const bi=$('#bkInfo');if(bi&&DESK.on){const t=DESK.info.lastBackup?new Date(DESK.info.lastBackup):null;
     bi.innerHTML=`<span class="mut">آخر نسخة: </span><b style="color:${DESK.err?'#fca5a5':'#86efac'}">${DESK.err?esc(DESK.err):t?dateStr(t)+' — '+time12(t,true):'لم تؤخذ بعد'}</b>`}
 }
-async function pickBkDir(){toast('افتح نافذة اختيار المجلد...','');const r=await fetch('/api/pickfolder',{method:'POST'});const j=await r.json();if(j.path){$('#bkDir').value=j.path;saveBkDir()}}
-async function saveBkDir(){const d=$('#bkDir').value.trim();const r=await fetch('/api/config',{method:'POST',body:JSON.stringify({backupDir:d})});const j=await r.json();
+async function pickBkDir(){toast('📁 جاري فتح نافذة اختيار المجلد...','');try{const r=await fetch('/api/pickfolder',{method:'POST'});const j=await r.json();if(j.path){$('#bkDir').value=j.path;saveBkDir()}else toast('لم يتم اختيار مجلد — يمكنك كتابة المسار يدوياً ثم حفظ','')}catch(e){deskDown()}}
+async function saveBkDir(){const d=$('#bkDir').value.trim();let j;try{const r=await fetch('/api/config',{method:'POST',body:JSON.stringify({backupDir:d})});j=await r.json()}catch(e){return deskDown()}
   if(!j.ok)return toast(j.error,'err');DESK.info.backupDir=j.backupDir;toast('تم حفظ المجلد: '+j.backupDir,'ok');backupNow(true)}
 async function saveKiosk(v){const r=await fetch('/api/config',{method:'POST',body:JSON.stringify({kioskPrint:v})});const j=await r.json();if(j.ok){DESK.info.kioskPrint=v;toast('تم الحفظ — أعد تشغيل البرنامج لتفعيل التغيير','ok')}}
 async function offerRestoreLatest(auto){
