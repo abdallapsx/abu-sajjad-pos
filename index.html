@@ -324,7 +324,7 @@ const SEED_ITEMS=[
 [9,'سلطة خضراء',2000,0,'🥗',''],[9,'حمص',2500,0,'🥣',''],[9,'طرشي وعمبة',1000,0,'🥒',''],[9,'خبز',500,0,'🍞',''],[9,'بطاطا مقلية',2000,0,'🍟',''],
 [10,'ماء',500,0,'💧',''],[10,'بيبسي',750,0,'🥤',''],[10,'لبن / شنينة',1000,0,'🥛',''],[10,'عصير',2500,0,'🧃',''],[10,'شاي',500,0,'🍵','']];
 const MENU_VER=2;
-const APP_VER='2.3.0';
+const APP_VER='2.3.1';
 const WEIGHTS=Array.from({length:20},(_,i)=>(i+1)/2); // 0.5 → 10 كغ
 /* ---------------- State ---------------- */
 let S={settings:null,users:[],cats:[],items:[]};
@@ -830,9 +830,25 @@ async function restoreData(d){try{if(!d||d.app!=='AbuSajjadPOS')throw new Error(
   await DB.set('settings',d.settings);await DB.set('users',d.users);await DB.set('cats',d.cats);await DB.set('items',d.items);await DB.clearInv();
   await DB.req('inv','readwrite',s=>{d.invoices.forEach(i=>s.put(i))});clearTimeout(bkT);await syncMarkLocal();toast('تم الاسترجاع، جاري إعادة التحميل...','ok');sessionStorage.clear();setTimeout(()=>location.reload(),1200)}
   catch(e){toast('فشل الاسترجاع: '+e.message,'err')}}
-async function wipeInv(){if(!await confirmBox('سيتم حذف <b>جميع الفواتير</b> نهائياً وإعادة الترقيم من 1. متأكد؟','حذف الكل'))return;
+async function wipeInv(){
+  const multi=SYNC.cfg&&SYNC.cfg.token;let scope='local';
+  if(multi){scope=await new Promise(res=>{modal(`<h3>🧹 حذف الفواتير</h3><p style="line-height:1.8">من وين تريد تحذف الفواتير؟</p>
+     <div class="mbtns" style="flex-direction:column"><button class="btn danger" id="wA">🖥️ كل الحاسبات (الرئيسية + الكاشير + الباقي)</button><button class="btn" id="wL">هذه الحاسبة فقط (${esc(SYNC.cfg.device||'')})</button><button class="btn ghost" id="wC">إلغاء</button></div>`,'sm');
+     $('#wA').onclick=()=>{closeModal();res('all')};$('#wL').onclick=()=>{closeModal();res('local')};$('#wC').onclick=()=>{closeModal();res(null)}});if(!scope)return}
+  if(!await confirmBox(`سيتم حذف <b>جميع الفواتير</b> ${scope==='all'?'من <b>كل الحاسبات</b>':'من هذه الحاسبة'} نهائياً وإعادة الترقيم من 1. متأكد؟<br><span class="mut">ننصح بأخذ نسخة احتياطية أولاً</span>`,'حذف الكل'))return;
   if(!await confirmBox('تأكيد أخير: لا يمكن التراجع عن هذه العملية!','نعم احذف'))return;
-  await DB.clearInv();S.settings.nextNo=1;await saveSettings();toast('تم حذف الفواتير','ok');admBackup()}
+  if(scope==='all'){const at=Date.now();await localWipe(at);S.settings.wipeAt=at;await saveSettings();clearTimeout(SYNC.pushT);syncNow('auto');
+    toast('تم حذف الفواتير — باقي الحاسبات تنحذف فواتيرها خلال دقيقة من اتصالها بالإنترنت','ok')}
+  else{await localWipe(Date.now());toast('تم حذف فواتير هذه الحاسبة','ok')}
+  admBackup()}
+// يحذف فواتير هذه الحاسبة التي قبل وقت معيّن، ويحدّث ملفات المبيعات على GitHub
+async function localWipe(at){
+  const all=await DB.allInv();const keep=all.filter(i=>i.ts>at);const months=[...new Set(all.map(i=>i.day.slice(0,7)))];
+  await DB.clearInv();if(keep.length)await DB.req('inv','readwrite',st=>{keep.forEach(i=>st.put(i))});
+  S.settings.nextNo=keep.length?Math.max(...keep.map(i=>i.no))+1:1;await saveSettings();await DB.set('wipedAt',at);
+  months.forEach(m=>salesDirty(m+'-01'));
+  if(VIEW==='invoices'&&$('#invTbl'))loadInvoices();if(VIEW==='pos'&&$('#cart'))renderCart();
+}
 
 /* ---------------- Desktop (local server) ---------------- */
 function logErr(msg){try{if(DESK.on)fetch('/api/log',{method:'POST',body:`[${new Date().toLocaleString('en-GB')}] ${ME?ME.username:'-'} | ${VIEW} | ${msg}`})}catch(e){}}
@@ -876,7 +892,7 @@ async function offerRestoreLatest(auto){
 /* ---------------- GitHub sync (مزامنة الأصناف والأسعار بين الحاسبات) ---------------- */
 // يُزامَن: الأقسام، الأصناف، الأسعار، المستخدمين، معلومات المطعم. لا يُزامَن: الفواتير، رقم الفاتورة، عرض الورق
 const SYNC={cfg:null,st:{localAt:0,remoteAt:0,sha:'',lastOk:0,err:''},busy:false,suspend:false,sig:'',pushT:null,loopT:null,api:localStorage.getItem('ghApi')||'https://api.github.com'};
-const SYNC_SET=['name','slogan','phone','address','footer','currency','logo','kitchenCopy','menuVer'];
+const SYNC_SET=['name','slogan','phone','address','footer','currency','logo','kitchenCopy','menuVer','wipeAt'];
 const setSig=()=>JSON.stringify(SYNC_SET.map(k=>S.settings&&S.settings[k]));
 function catChanged(){if(SYNC.suspend||!SYNC.cfg)return;SYNC.st.localAt=Date.now();DB.set('syncState',SYNC.st);clearTimeout(SYNC.pushT);SYNC.pushT=setTimeout(()=>syncNow('auto'),4000)}
 async function syncMarkLocal(){if(!SYNC.cfg)return;SYNC.st.localAt=Date.now();await DB.set('syncState',SYNC.st)}
@@ -927,6 +943,7 @@ async function applyRemote(d){
   if(ME){const u=S.users.find(x=>x.id===ME.id);if(u)ME=u}
   if(CURCAT!=='all'&&!catOf(CURCAT))CURCAT='all';
   if(!modalOpen()){if(!ME)renderLogin();else if(VIEW==='pos'&&$('#cats')){renderCats();renderItems();renderCart()}else if(VIEW==='admin')renderAdmin()}
+  if((S.settings.wipeAt||0)>(await DB.get('wipedAt')||0)){await localWipe(S.settings.wipeAt);toast('🧹 تم حذف الفواتير بطلب من المدير','ok')}
   toast('🔄 تم تحديث الأصناف والأسعار من GitHub'+(d.by?' ('+d.by+')':''),'ok');
 }
 async function syncNow(mode='auto',silent=true){
@@ -1041,7 +1058,7 @@ async function remoteInvoices(from,to,only){
       let c=RCACHE[f.path];
       if(!c||c.sha!==f.sha){const b=await gh('GET',`/repos/${SYNC.cfg.repo}/git/blobs/${f.sha}`);if(!b.ok)throw new Error(ghErr(b));c=RCACHE[f.path]={sha:f.sha,doc:JSON.parse(b64dec(b.j.content))}}
       const nm=c.doc.device&&c.doc.device.name||d.name;if(SYNC.knownDevs[d.name]!==nm){SYNC.knownDevs[d.name]=nm;changed=true}
-      c.doc.invoices.forEach(i=>{if(i.day>=from&&i.day<=to)out.push({...i,_dev:d.name,_devName:nm})});
+      c.doc.invoices.forEach(i=>{if(i.day>=from&&i.day<=to&&i.ts>(S.settings.wipeAt||0))out.push({...i,_dev:d.name,_devName:nm})});
     }));
   }));
   if(changed)DB.set('knownDevs',SYNC.knownDevs);
