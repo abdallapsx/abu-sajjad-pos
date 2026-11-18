@@ -43,12 +43,13 @@ label.chk{display:flex;align-items:center;gap:10px;cursor:pointer}
 
 /* ===== Shell ===== */
 .top{height:66px;display:flex;align-items:center;gap:18px;padding:0 18px;background:linear-gradient(180deg,#111f2c,#0d1822);border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:12px;min-width:250px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0;flex-shrink:0}
+@media(max-width:1500px){.brand small{display:none}.top{gap:10px}.bkst{padding:5px 8px}}
 .brand .lg{width:46px;height:46px;border-radius:13px;background:linear-gradient(135deg,var(--gold2),#e06a00);display:grid;place-items:center;font-size:26px;overflow:hidden}
 .brand .lg img{width:100%;height:100%;object-fit:cover}
 .brand b{display:block;font-size:18px;font-weight:900}.brand small{color:var(--mut);font-size:12px}
 nav{display:flex;gap:6px;flex:1}
-nav button{background:transparent;border:0;padding:10px 16px;border-radius:10px;cursor:pointer;color:var(--mut);font-weight:700;font-size:15px}
+nav button{white-space:nowrap;background:transparent;border:0;padding:10px 14px;border-radius:10px;cursor:pointer;color:var(--mut);font-weight:700;font-size:15px}
 nav button:hover{background:#ffffff0a;color:var(--tx)}
 nav button.on{background:#f5a5241c;color:var(--gold2)}
 .clock{text-align:center;line-height:1.2}.clock b{font-size:20px;font-variant-numeric:tabular-nums;color:var(--gold2)}.clock small{display:block;color:var(--mut);font-size:12px}
@@ -285,10 +286,10 @@ const DB={
   maxInv:()=>new Promise(res=>{const c=DB.db.transaction('inv').objectStore('inv').openCursor(null,'prev');c.onsuccess=()=>res(c.result?c.result.key:0);c.onerror=()=>res(0)})
 };
 ['set','addInv','putInv','clearInv'].forEach(k=>{const f=DB[k];DB[k]=async(...a)=>{const r=await f(...a);scheduleBackup();return r}});
-const saveSettings=()=>DB.set('settings',S.settings);
-const saveUsers=()=>DB.set('users',S.users);
-const saveCats=()=>DB.set('cats',S.cats);
-const saveItems=()=>DB.set('items',S.items);
+const saveSettings=()=>{if(setSig()!==SYNC.sig){SYNC.sig=setSig();catChanged()}return DB.set('settings',S.settings)};
+const saveUsers=()=>{catChanged();return DB.set('users',S.users)};
+const saveCats=()=>{catChanged();return DB.set('cats',S.cats)};
+const saveItems=()=>{catChanged();return DB.set('items',S.items)};
 
 async function hashPw(p){p='abusajjad#'+p;
   try{if(window.crypto&&crypto.subtle){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(p));return 'h1:'+[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}}catch(e){}
@@ -332,6 +333,7 @@ const pic=(o,fallback='🍽️')=>o&&o.img?`<img src="${o.img}">`:esc(o&&o.emoji
 async function boot(){
   try{await DB.open()}catch(e){document.body.innerHTML='<h2 style="padding:40px">تعذر فتح قاعدة البيانات</h2>';return}
   await deskInit();
+  SYNC.suspend=true;
   const fresh=!(await DB.get('users'))&&!(await DB.maxInv());
   S.settings=Object.assign({},DEFAULT_SETTINGS,await DB.get('settings')||{});
   S.users=await DB.get('users')||[];
@@ -344,6 +346,7 @@ async function boot(){
     CURCAT='all';await saveCats();await saveItems()}
   const mx=await DB.maxInv();if(S.settings.nextNo<=mx)S.settings.nextNo=mx+1;
   await saveSettings();applyPageStyle();
+  SYNC.sig=setSig();SYNC.suspend=false;await syncInit();
   const sid=sessionStorage.getItem('uid');ME=S.users.find(u=>u.id===sid&&u.active)||null;
   ME?renderShell():renderLogin();
   setInterval(tick,1000);tick();
@@ -393,11 +396,11 @@ function renderShell(){
   $('#app').innerHTML=`<header class="top">
    <div class="brand"><div class="lg">${S.settings.logo?`<img src="${S.settings.logo}">`:'🐟'}</div><div><b>${esc(S.settings.name)}</b><small>${esc(S.settings.slogan)}</small></div></div>
    <nav>${nav.map(n=>`<button class="${VIEW===n[0]?'on':''}" onclick="go('${n[0]}')">${n[1]}</button>`).join('')}</nav>
-   ${DESK.on?`<div class="bkst" id="bkst" onclick="if(isAdmin()){ADMTAB='backup';go('admin')}" title="النسخ الاحتياطي التلقائي"></div>`:''}<button class="kbtn ${VK.auto?'on':''}" id="kbT" onclick="vkToggle()" title="الكيبورد على الشاشة">⌨️</button>
+   ${DESK.on?`<div class="bkst" id="bkst" onclick="if(isAdmin()){ADMTAB='backup';go('admin')}" title="النسخ الاحتياطي التلقائي"></div>`:''}<div class="bkst ${SYNC.cfg&&SYNC.cfg.token?'':'hidden'}" id="syst" onclick="if(isAdmin()){ADMTAB='sync';go('admin')}"></div><button class="kbtn ${VK.auto?'on':''}" id="kbT" onclick="vkToggle()" title="الكيبورد على الشاشة">⌨️</button>
    <div class="clock"><b id="clkT"></b><small id="clkD"></small></div>
    <div class="me"><div class="av">👤</div><div><b>${esc(ME.name)}</b><br><small>${ME.role==='admin'?'مدير':'كاشير'}</small></div><button class="btn sm danger" onclick="logout()">خروج</button></div>
   </header><main id="view"></main>`;
-  tick();updBkStatus();({pos:renderPOS,invoices:renderInvoices,reports:renderReports,admin:renderAdmin})[VIEW]();
+  tick();updBkStatus();updSyncStatus();({pos:renderPOS,invoices:renderInvoices,reports:renderReports,admin:renderAdmin})[VIEW]();
 }
 function go(v){VIEW=v;renderShell()}
 
@@ -647,9 +650,9 @@ function printReport(){if(!REPDATA)return;const R=REPDATA,s=S.settings,d=new Dat
 /* ---------------- Admin ---------------- */
 function renderAdmin(){
   if(!isAdmin())return go('pos');
-  const tabs=[['cats','📂 الأقسام'],['items','🍽️ الأصناف والأسعار'],['users','👥 المستخدمين'],['settings','🏪 إعدادات المطعم'],['backup','💾 النسخ الاحتياطي']];
+  const tabs=[['cats','📂 الأقسام'],['items','🍽️ الأصناف والأسعار'],['users','👥 المستخدمين'],['settings','🏪 إعدادات المطعم'],['sync','🔄 المزامنة'],['backup','💾 النسخ الاحتياطي']];
   $('#view').innerHTML=`<div class="page"><div class="tabs">${tabs.map(t=>`<button class="${ADMTAB===t[0]?'on':''}" onclick="ADMTAB='${t[0]}';renderAdmin()">${t[1]}</button>`).join('')}</div><div id="adm"></div></div>`;
-  ({cats:admCats,items:admItems,users:admUsers,settings:admSettings,backup:admBackup})[ADMTAB]();
+  ({cats:admCats,items:admItems,users:admUsers,settings:admSettings,sync:admSync,backup:admBackup})[ADMTAB]();
 }
 /* Categories */
 function admCats(){const cats=[...S.cats].sort((a,b)=>a.order-b.order);
@@ -794,7 +797,7 @@ async function importData(f){try{await restoreData(JSON.parse(await f.text()))}c
 async function restoreData(d){try{if(!d||d.app!=='AbuSajjadPOS')throw new Error('الملف ليس نسخة من هذا البرنامج');
   if(!await confirmBox(`استرجاع نسخة بتاريخ ${dateStr(new Date(d.at))}؟<br>فيها ${d.invoices.length} فاتورة و ${d.items.length} صنف.<br><b>سيتم استبدال البيانات الحالية.</b>`,'استرجاع'))return;
   await DB.set('settings',d.settings);await DB.set('users',d.users);await DB.set('cats',d.cats);await DB.set('items',d.items);await DB.clearInv();
-  await DB.req('inv','readwrite',s=>{d.invoices.forEach(i=>s.put(i))});clearTimeout(bkT);toast('تم الاسترجاع، جاري إعادة التحميل...','ok');sessionStorage.clear();setTimeout(()=>location.reload(),1200)}
+  await DB.req('inv','readwrite',s=>{d.invoices.forEach(i=>s.put(i))});clearTimeout(bkT);await syncMarkLocal();toast('تم الاسترجاع، جاري إعادة التحميل...','ok');sessionStorage.clear();setTimeout(()=>location.reload(),1200)}
   catch(e){toast('فشل الاسترجاع: '+e.message,'err')}}
 async function wipeInv(){if(!await confirmBox('سيتم حذف <b>جميع الفواتير</b> نهائياً وإعادة الترقيم من 1. متأكد؟','حذف الكل'))return;
   if(!await confirmBox('تأكيد أخير: لا يمكن التراجع عن هذه العملية!','نعم احذف'))return;
@@ -838,6 +841,127 @@ async function offerRestoreLatest(auto){
     await restoreData(d)}catch(e){toast('تعذر قراءة النسخة: '+e.message,'err')}
 }
 
+/* ---------------- GitHub sync (مزامنة الأصناف والأسعار بين الحاسبات) ---------------- */
+// يُزامَن: الأقسام، الأصناف، الأسعار، المستخدمين، معلومات المطعم. لا يُزامَن: الفواتير، رقم الفاتورة، عرض الورق
+const SYNC={cfg:null,st:{localAt:0,remoteAt:0,sha:'',lastOk:0,err:''},busy:false,suspend:false,sig:'',pushT:null,loopT:null,api:localStorage.getItem('ghApi')||'https://api.github.com'};
+const SYNC_SET=['name','slogan','phone','address','footer','currency','logo','kitchenCopy','menuVer'];
+const setSig=()=>JSON.stringify(SYNC_SET.map(k=>S.settings&&S.settings[k]));
+function catChanged(){if(SYNC.suspend||!SYNC.cfg)return;SYNC.st.localAt=Date.now();DB.set('syncState',SYNC.st);clearTimeout(SYNC.pushT);SYNC.pushT=setTimeout(()=>syncNow('auto'),4000)}
+async function syncMarkLocal(){if(!SYNC.cfg)return;SYNC.st.localAt=Date.now();await DB.set('syncState',SYNC.st)}
+async function syncInit(){
+  SYNC.cfg=await DB.get('syncCfg')||null;SYNC.st=Object.assign(SYNC.st,await DB.get('syncState')||{});
+  if(!SYNC.cfg||!SYNC.cfg.token||!SYNC.cfg.auto)return;
+  clearInterval(SYNC.loopT);SYNC.loopT=setInterval(()=>syncNow('auto'),60000);
+  setTimeout(()=>syncNow('auto'),1500);
+  window.addEventListener('online',()=>syncNow('auto'));
+}
+function b64enc(str){const b=new TextEncoder().encode(str);let s='';for(let i=0;i<b.length;i+=0x8000)s+=String.fromCharCode.apply(null,b.subarray(i,i+0x8000));return btoa(s)}
+function b64dec(b){const bin=atob(b.replace(/\s/g,''));const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new TextDecoder().decode(u)}
+async function gh(method,path,body,cfg=SYNC.cfg){
+  const r=await fetch(SYNC.api+path,{method,cache:'no-store',headers:{'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},body:body?JSON.stringify(body):undefined});
+  let j=null;try{j=await r.json()}catch(e){}
+  return {status:r.status,ok:r.ok,j};
+}
+const ghErr=(r)=>r.status===401?'التوكن غير صحيح أو منتهي':r.status===403?'التوكن لا يملك صلاحية (Contents: Read and write)':r.status===404?'المستودع أو الملف غير موجود / التوكن لا يرى المستودع':('خطأ من GitHub رقم '+r.status+(r.j&&r.j.message?' — '+r.j.message:''));
+const FILE='data/catalog.json';
+async function ghRead(cfg=SYNC.cfg){
+  const r=await gh('GET',`/repos/${cfg.repo}/contents/${FILE}`,null,cfg);
+  if(r.status===404)return {exists:false};
+  if(!r.ok)throw new Error(ghErr(r));
+  let c=r.j.content;
+  if(!c||r.j.encoding==='none'){const b=await gh('GET',`/repos/${cfg.repo}/git/blobs/${r.j.sha}`,null,cfg);if(!b.ok)throw new Error(ghErr(b));c=b.j.content}
+  const d=JSON.parse(b64dec(c));if(d.app!=='AbuSajjadPOS-catalog')throw new Error('ملف المزامنة غير صالح');
+  return {exists:true,sha:r.j.sha,d};
+}
+async function ghWrite(sha){
+  const at=SYNC.st.localAt||Date.now();
+  const pick={};SYNC_SET.forEach(k=>pick[k]=S.settings[k]);
+  const doc={app:'AbuSajjadPOS-catalog',v:1,at,by:SYNC.cfg.device||'',settings:pick,users:S.users,cats:S.cats,items:S.items};
+  const body={message:`تحديث الأصناف والأسعار — ${SYNC.cfg.device||''} — ${dateStr(new Date(at))} ${time12(new Date(at))}`,content:b64enc(JSON.stringify(doc))};
+  if(sha)body.sha=sha;
+  const r=await gh('PUT',`/repos/${SYNC.cfg.repo}/contents/${FILE}`,body);
+  if(r.status===409||r.status===422)return {conflict:true};
+  if(!r.ok)throw new Error(ghErr(r));
+  return {sha:r.j.content.sha,at};
+}
+async function applyRemote(d){
+  SYNC.suspend=true;
+  try{S.cats=d.cats||[];S.items=d.items||[];S.users=d.users&&d.users.length?d.users:S.users;
+    SYNC_SET.forEach(k=>{if(d.settings&&k in d.settings)S.settings[k]=d.settings[k]});
+    await DB.set('cats',S.cats);await DB.set('items',S.items);await DB.set('users',S.users);await DB.set('settings',S.settings);SYNC.sig=setSig();
+  }finally{SYNC.suspend=false}
+  if(ME){const u=S.users.find(x=>x.id===ME.id);if(u)ME=u}
+  if(CURCAT!=='all'&&!catOf(CURCAT))CURCAT='all';
+  if(!modalOpen()){if(!ME)renderLogin();else if(VIEW==='pos'&&$('#cats')){renderCats();renderItems();renderCart()}else if(VIEW==='admin')renderAdmin()}
+  toast('🔄 تم تحديث الأصناف والأسعار من GitHub'+(d.by?' ('+d.by+')':''),'ok');
+}
+async function syncNow(mode='auto',silent=true){
+  if(!SYNC.cfg||!SYNC.cfg.token)return;
+  if(SYNC.busy){if(mode!=='auto')toast('المزامنة جارية، انتظر قليلاً','');return}
+  SYNC.busy=true;updSyncStatus(true);
+  try{
+    for(let attempt=0;attempt<3;attempt++){
+      const rem=await ghRead();
+      const rAt=rem.exists?(rem.d.at||0):0;
+      if(mode==='pull'){if(!rem.exists)throw new Error('لا توجد بيانات على GitHub بعد — ارفعها من الحاسبة الرئيسية أولاً');
+        await applyRemote(rem.d);SYNC.st.localAt=rAt;SYNC.st.remoteAt=rAt;SYNC.st.sha=rem.sha;break}
+      if(mode==='push')SYNC.st.localAt=Math.max(Date.now(),rAt+1);
+      if(rem.exists&&rAt>SYNC.st.localAt){await applyRemote(rem.d);SYNC.st.localAt=rAt;SYNC.st.remoteAt=rAt;SYNC.st.sha=rem.sha;break}
+      if(!rem.exists||SYNC.st.localAt>rAt){const w=await ghWrite(rem.exists?rem.sha:null);if(w.conflict){mode='auto';continue}
+        SYNC.st.sha=w.sha;SYNC.st.remoteAt=w.at;if(!silent)toast('⬆️ تم رفع الأصناف والأسعار إلى GitHub','ok');break}
+      if(!silent)toast('✔ البيانات متطابقة مع GitHub','ok');break;
+    }
+    SYNC.st.lastOk=Date.now();SYNC.st.err='';
+  }catch(e){SYNC.st.err=e.message||'تعذر الاتصال بالإنترنت';if(!silent)toast('⚠️ المزامنة: '+SYNC.st.err,'err');else logErr&&logErr('SYNC '+SYNC.st.err)}
+  finally{SYNC.busy=false;await DB.set('syncState',SYNC.st);updSyncStatus();const si=$('#syncInfo');if(si)si.innerHTML=syncInfoHTML()}
+}
+function updSyncStatus(busy){const el=$('#syst');if(!el)return;if(!SYNC.cfg||!SYNC.cfg.token){el.classList.add('hidden');return}
+  el.classList.remove('hidden');el.className='bkst'+(SYNC.st.err?' bad':'');
+  el.innerHTML=busy?'<i style="background:var(--gold);box-shadow:0 0 8px var(--gold)"></i>جاري المزامنة...':SYNC.st.err?'<i></i>المزامنة متوقفة':`<i></i>🔄 متزامن ${SYNC.st.lastOk?time12(new Date(SYNC.st.lastOk)):'—'}`}
+function syncInfoHTML(){const t=x=>x?dateStr(new Date(x))+' — '+time12(new Date(x),true):'—';
+  return `<div style="line-height:2">آخر مزامنة ناجحة: <b style="color:#86efac">${t(SYNC.st.lastOk)}</b><br>آخر تعديل محلي: <b>${t(SYNC.st.localAt)}</b> — نسخة GitHub: <b>${t(SYNC.st.remoteAt)}</b>${SYNC.st.err?`<br><b style="color:#fca5a5">⚠️ ${esc(SYNC.st.err)}</b>`:''}</div>`}
+function admSync(){const c=SYNC.cfg||{repo:'abdallapsx/abu-sajjad-data',token:'',device:'',auto:true};
+  $('#adm').innerHTML=`<div class="grid2"><div class="box"><h3>🔄 المزامنة بين الحاسبات عبر GitHub</h3>
+   <p class="mut" style="line-height:1.8;margin-bottom:12px">أي تعديل على <b>الأقسام، الأصناف، الأسعار، الصور، المستخدمين، ومعلومات المطعم</b> في أي حاسبة يُرفع إلى GitHub ويصل لباقي الحاسبات خلال دقيقة. <br>الفواتير ورقم الفاتورة تبقى خاصة بكل حاسبة.</p>
+   <div class="form"><label class="f full">المستودع (يجب أن يكون Private)<input id="syR" value="${esc(c.repo)}" dir="ltr" style="text-align:left" autocomplete="off" spellcheck="false"></label>
+   <label class="f full">التوكن (Token)<input id="syT" class="pw" value="${esc(c.token)}" dir="ltr" style="text-align:left" autocomplete="off" spellcheck="false" placeholder="github_pat_..."></label>
+   <label class="f full">اسم هذه الحاسبة<input id="syD" value="${esc(c.device)}" placeholder="مثال: الحاسبة الرئيسية / حاسبة الكاشير"></label>
+   <label class="chk full"><input type="checkbox" id="syA" ${c.auto!==false?'checked':''}> مزامنة تلقائية (كل دقيقة وبعد كل تعديل)</label></div>
+   <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn gold" onclick="syncConnect()">🔗 حفظ وربط</button>
+    ${c.token?`<button class="btn danger" onclick="syncDisconnect()">فصل المزامنة</button>`:''}</div></div>
+   <div class="box"><h3>📊 حالة المزامنة</h3><div id="syncInfo">${c.token?syncInfoHTML():'<span class="mut">غير مربوطة</span>'}</div>
+   ${c.token?`<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn sea" onclick="syncNow('auto',false)">🔄 مزامنة الآن</button>
+    <button class="btn" onclick="syncForce('push')">⬆️ رفع بيانات هذه الحاسبة</button><button class="btn" onclick="syncForce('pull')">⬇️ تحميل من GitHub</button></div>`:''}
+   <p class="mut" style="line-height:1.8;margin-top:14px;font-size:13px">⚠️ إذا عدّلت نفس الشي بحاسبتين بنفس الوقت، يبقى التعديل الأحدث.</p></div></div>`}
+async function syncForce(m){
+  const msg=m==='push'?'رفع بيانات هذه الحاسبة إلى GitHub؟<br>ستُستبدل الأصناف والأسعار في <b>كل الحاسبات</b> ببيانات هذه الحاسبة.':'تحميل البيانات من GitHub؟<br>ستُستبدل الأصناف والأسعار والمستخدمين في <b>هذه الحاسبة</b>.';
+  if(await confirmBox(msg,m==='push'?'رفع':'تحميل'))syncNow(m,false)}
+async function syncConnect(){
+  const cfg={repo:$('#syR').value.trim().replace(/^https?:\/\/github\.com\//,'').replace(/\.git$/,'').replace(/\/$/,''),token:$('#syT').value.trim(),device:$('#syD').value.trim()||'حاسبة',auto:$('#syA').checked};
+  if(!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo))return toast('اكتب المستودع بهذا الشكل: abdallapsx/abu-sajjad-data','err');
+  if(!cfg.token)return toast('الصق التوكن','err');
+  toast('جاري الاتصال بـ GitHub...','');
+  try{const r=await gh('GET',`/repos/${cfg.repo}`,null,cfg);
+    if(!r.ok)throw new Error(ghErr(r));
+    if(!r.j.private)throw new Error('المستودع عام (Public)! اجعله Private لأن فيه بيانات المستخدمين');
+    if(r.j.permissions&&r.j.permissions.push===false)throw new Error('التوكن لا يملك صلاحية الكتابة');
+    const rem=await ghRead(cfg);
+    const first=!SYNC.cfg||SYNC.cfg.repo!==cfg.repo;
+    SYNC.cfg=cfg;await DB.set('syncCfg',cfg);
+    if(first){
+      if(rem.exists){
+        const pull=await new Promise(res=>{modal(`<h3>🔄 توجد بيانات على GitHub</h3><p style="line-height:1.8">آخر تحديث: <b>${dateStr(new Date(rem.d.at))} ${time12(new Date(rem.d.at))}</b>${rem.d.by?' من <b>'+esc(rem.d.by)+'</b>':''}<br>فيها ${rem.d.items.length} صنف و ${rem.d.users.length} مستخدم.<br><br>ماذا تريد؟</p>
+          <div class="mbtns"><button class="btn gold" id="sP">⬇️ تحميلها لهذه الحاسبة</button><button class="btn" id="sU">⬆️ رفع بيانات هذه الحاسبة بدلها</button></div>`,'sm');
+          $('#sP').onclick=()=>{closeModal();res(true)};$('#sU').onclick=()=>{closeModal();res(false)}});
+        await syncNow(pull?'pull':'push',false);
+      }else await syncNow('push',false);
+    }else await syncNow('auto',false);
+    await syncInit();renderShell();toast('✔ تم ربط المزامنة','ok');
+  }catch(e){toast('⚠️ '+e.message,'err')}
+}
+async function syncDisconnect(){if(!await confirmBox('فصل المزامنة في هذه الحاسبة؟ (البيانات تبقى كما هي)','فصل'))return;
+  SYNC.cfg=null;clearInterval(SYNC.loopT);await DB.set('syncCfg',null);SYNC.st={localAt:0,remoteAt:0,sha:'',lastOk:0,err:''};await DB.set('syncState',SYNC.st);renderShell()}
+
 /* ---------------- On-screen keyboard (كيبورد الشاشة) ---------------- */
 const VK={el:null,t:null,lang:'ar',shift:false,auto:localStorage.getItem('vkAuto')!=='0'};
 const VK_L={
@@ -860,7 +984,7 @@ function vkRender(){
   VK.el.innerHTML=bar+lay.map((r,i)=>`<div class="vk-row">${i===3?K('SHIFT',VK.lang==='ar'?'⇧ رموز':'⇧ Shift','fn w2'+(VK.shift?' on':'')):''}${r.map(k=>K(up?k.toUpperCase():k)).join('')}${i===0?K('BS','⌫','fn w2'):''}${i===2?K('ENT','⏎ إدخال','ent'):''}</div>`).join('')+
    `<div class="vk-row">${K('LANG',VK.lang==='ar'?'🌐 English':'🌐 عربي','fn w2')}${K('CLR','مسح الكل','fn w2')}${K(' ','مسافة','sp')}${K('HIDE','✕ إخفاء','fn w2')}</div>`;
 }
-function vkShow(el){if(!vkOK(el))return;VK.t=el;if(el.dataset.num===undefined){VK.lang=(el.classList.contains('pw')||['lu','uU','bkDir'].includes(el.id))?'en':'ar';VK.shift=false}vkRender();VK.el.style.display='';document.body.classList.add('kbon');
+function vkShow(el){if(!vkOK(el))return;VK.t=el;if(el.dataset.num===undefined){VK.lang=(el.classList.contains('pw')||['lu','uU','bkDir','syR','syT'].includes(el.id))?'en':'ar';VK.shift=false}vkRender();VK.el.style.display='';document.body.classList.add('kbon');
   setTimeout(()=>{if(VK.t){const r=VK.t.getBoundingClientRect(),kh=VK.el.offsetHeight;if(r.bottom>innerHeight-kh-10){const sc=VK.t.closest('.page,.modal,.lines,.cart');if(sc&&sc.scrollHeight>sc.clientHeight)VK.t.scrollIntoView({block:'center'})}}},30)}
 function vkHide(){if(VK.el)VK.el.style.display='none';document.body.classList.remove('kbon');VK.t=null}
 function vkToggle(){VK.auto=!VK.auto;localStorage.setItem('vkAuto',VK.auto?'1':'0');document.querySelectorAll('#kbT').forEach(b=>b.classList.toggle('on',VK.auto));
