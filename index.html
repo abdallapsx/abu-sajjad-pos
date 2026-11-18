@@ -189,6 +189,11 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;background:var(--
 .vk-num{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;max-width:520px;margin:0 auto}
 .vk-num .vk-k{max-width:none;height:56px;font-size:24px}
 body.kbon .modal-wrap{padding-bottom:310px}
+.vk.vktop{top:0;bottom:auto;border-radius:0 0 18px 18px;border-top:0;border-bottom:1px solid var(--line);animation:none}
+body.kbon.kbtop .modal-wrap{padding-bottom:0;padding-top:330px}
+body.kbon.kbtop .page{padding-bottom:20px;padding-top:340px}
+body.kbon.kbtop .login{padding-top:340px}
+body.kbon.kbtop #toasts{top:auto;bottom:22px}
 body.kbon .login{place-items:start center;padding-top:14px}
 body.kbon .lcard .lg,body.kbon .lcard .sl,body.kbon .lclock{display:none}
 body.kbon .modal{max-height:calc(100vh - 330px)}
@@ -1042,7 +1047,7 @@ async function remoteInvoices(from,to,only){
 }
 
 /* ---------------- On-screen keyboard (كيبورد الشاشة) ---------------- */
-const VK={el:null,t:null,lang:'ar',shift:false,auto:localStorage.getItem('vkAuto')!=='0'};
+const VK={el:null,t:null,lang:'ar',shift:false,auto:localStorage.getItem('vkAuto')!=='0',top:localStorage.getItem('vkTop')==='1'};
 const VK_L={
  ar:[['1','2','3','4','5','6','7','8','9','0'],['ض','ص','ث','ق','ف','غ','ع','ه','خ','ح','ج','د'],['ش','س','ي','ب','ل','ا','ت','ن','م','ك','ط'],['ئ','ء','ؤ','ر','لا','ى','ة','و','ز','ظ','ذ']],
  arS:[['!','@','#','%','&','*','(',')','-','+'],['أ','إ','آ','لأ','لإ','لآ','ـ','،','؛','؟',':','/'],['ّ','َ','ُ','ِ','ً','ٌ','ٍ','ْ','"','\'','.'],['ٱ','=','_','[',']','<','>','×','÷',',','؟']],
@@ -1055,7 +1060,7 @@ function vkRender(){
     VK.el.addEventListener('pointerdown',e=>{e.preventDefault();const k=e.target.closest('[data-k]');if(!k)return;k.classList.add('dn');setTimeout(()=>k.classList.remove('dn'),120);vkPress(k.dataset.k)})}
   const el=VK.t,num=el&&el.dataset.num,pw=el&&el.classList.contains('pw');
   const val=el?(pw?'•'.repeat(el.value.length):el.value):'';
-  const bar=`<div class="vk-bar"><span class="lbl">⌨️ ${esc(el?vkLabel(el):'')}</span><div class="val">${esc(val)||'&nbsp;'}</div></div>`;
+  const bar=`<div class="vk-bar"><span class="lbl">⌨️ ${esc(el?vkLabel(el):'')}</span><div class="val">${esc(val)||'&nbsp;'}</div><button class="vk-k fn" data-k="MOVE" style="max-width:150px;height:36px;font-size:14px">${VK.top?'⬇️ نقل للأسفل':'⬆️ نقل للأعلى'}</button></div>`;
   const K=(k,txt,cls='')=>`<button class="vk-k ${cls}" data-k="${esc(k)}">${txt??esc(k)}</button>`;
   if(num){VK.el.innerHTML=bar+`<div class="vk-num">${['7','8','9'].map(k=>K(k)).join('')}${K('BS','⌫','fn')}${['4','5','6'].map(k=>K(k)).join('')}${K('CLR','مسح','fn')}${['1','2','3'].map(k=>K(k)).join('')}${K('HIDE','✕ إخفاء','fn')}${K('.')}${K('0')}${K('000')}${K('ENT','⏎ تم','ent')}</div>`;return}
   const lay=VK.lang==='ar'?(VK.shift?VK_L.arS:VK_L.ar):VK_L.en;
@@ -1063,7 +1068,8 @@ function vkRender(){
   VK.el.innerHTML=bar+lay.map((r,i)=>`<div class="vk-row">${i===3?K('SHIFT',VK.lang==='ar'?'⇧ رموز':'⇧ Shift','fn w2'+(VK.shift?' on':'')):''}${r.map(k=>K(up?k.toUpperCase():k)).join('')}${i===0?K('BS','⌫','fn w2'):''}${i===2?K('ENT','⏎ إدخال','ent'):''}</div>`).join('')+
    `<div class="vk-row">${K('LANG',VK.lang==='ar'?'🌐 English':'🌐 عربي','fn w2')}${K('CLR','مسح الكل','fn w2')}${K(' ','مسافة','sp')}${K('HIDE','✕ إخفاء','fn w2')}</div>`;
 }
-function vkShow(el){if(!vkOK(el))return;VK.t=el;if(el.dataset.num===undefined){VK.lang=(el.classList.contains('pw')||['lu','uU','bkDir','syR','syT'].includes(el.id))?'en':'ar';VK.shift=false}vkRender();VK.el.style.display='';document.body.classList.add('kbon');
+function vkPlace(){if(VK.el)VK.el.classList.toggle('vktop',VK.top);document.body.classList.toggle('kbtop',VK.top)}
+function vkShow(el){if(!vkOK(el))return;VK.t=el;if(el.dataset.im===undefined)el.dataset.im=el.getAttribute('inputmode')||'';el.setAttribute('inputmode','none');if(el.dataset.num===undefined){VK.lang=(el.classList.contains('pw')||['lu','uU','bkDir','syR','syT'].includes(el.id))?'en':'ar';VK.shift=false}vkRender();vkPlace();VK.el.style.display='';document.body.classList.add('kbon');
   setTimeout(()=>{if(VK.t){const r=VK.t.getBoundingClientRect(),kh=VK.el.offsetHeight;if(r.bottom>innerHeight-kh-10){const sc=VK.t.closest('.page,.modal,.lines,.cart');if(sc&&sc.scrollHeight>sc.clientHeight)VK.t.scrollIntoView({block:'center'})}}},30)}
 function vkHide(){if(VK.el)VK.el.style.display='none';document.body.classList.remove('kbon');VK.t=null}
 function vkToggle(){VK.auto=!VK.auto;localStorage.setItem('vkAuto',VK.auto?'1':'0');document.querySelectorAll('#kbT').forEach(b=>b.classList.toggle('on',VK.auto));
@@ -1073,6 +1079,7 @@ function vkPress(k){
   const el=VK.t;if(!el||!document.body.contains(el)){vkHide();return}
   const fire=()=>el.dispatchEvent(new Event('input',{bubbles:true}));
   if(k==='HIDE'){vkHide();return}
+  if(k==='MOVE'){VK.top=!VK.top;localStorage.setItem('vkTop',VK.top?'1':'0');vkPlace();vkRender();return}
   if(k==='SHIFT'){VK.shift=!VK.shift;vkRender();return}
   if(k==='LANG'){VK.lang=VK.lang==='ar'?'en':'ar';VK.shift=false;vkRender();return}
   if(k==='CLR'){el.value='';fire();vkRender();return}
@@ -1086,7 +1093,7 @@ function vkPress(k){
   if(VK.shift&&VK.lang==='en'){VK.shift=false}
   function ins(t){const s=el.selectionStart??el.value.length,e=el.selectionEnd??s;if(el.maxLength>0&&el.value.length-(e-s)+t.length>el.maxLength)return;el.setRangeText(t,s,e,'end');fire();vkRender()}
 }
-document.addEventListener('focusin',e=>{if(VK.auto&&vkOK(e.target))vkShow(e.target)});
+document.addEventListener('focusin',e=>{const t=e.target;if(VK.auto&&vkOK(t))vkShow(t);else if(t.dataset&&t.dataset.im!==undefined){if(t.dataset.im)t.setAttribute('inputmode',t.dataset.im);else t.removeAttribute('inputmode')}});
 // الإخفاء بعد اكتمال الضغطة حتى لا تتحرك الأزرار تحت إصبع المستخدم
 let vkPtr=false;
 document.addEventListener('pointerdown',e=>{if(!(VK.el&&VK.el.contains(e.target)))vkPtr=true},true);
