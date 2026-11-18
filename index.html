@@ -564,40 +564,57 @@ function printInvoice(inv,mode='customer'){
   let h='';if(mode!=='kitchen')h+=receiptHTML(inv);if(mode==='both')h+='<div class="pb"></div>';if(mode!=='customer')h+=kitchenHTML(inv);doPrint(h)}
 
 /* ---------------- Invoices ---------------- */
-let INVF=null;
+let INVF=null,INVLIST=[];
+// مصدر الفواتير: all = كل الحاسبات، local = هذه الحاسبة، أو رقم حاسبة معينة
+let SRC=null;
+const multiSrc=()=>isAdmin()&&SYNC.cfg&&SYNC.cfg.token;
+function srcSelect(){if(!multiSrc())return '';if(SRC===null)SRC='all';
+  return `<label class="f">الحاسبة<select id="fsrc"><option value="all" ${SRC==='all'?'selected':''}>🖥️ كل الحاسبات</option><option value="local" ${SRC==='local'?'selected':''}>هذه الحاسبة (${esc(SYNC.cfg.device||'')})</option>${Object.entries(SYNC.knownDevs||{}).filter(([id])=>id!==SYNC.devId).map(([id,n])=>`<option value="${id}" ${SRC===id?'selected':''}>${esc(n)}</option>`).join('')}</select></label>`}
+async function gatherInvoices(from,to){
+  // يرجع فواتير هذه الحاسبة + الحاسبات الأخرى حسب المصدر المختار
+  const src=multiSrc()?(SRC||'all'):'local';let list=[];
+  if(src==='all'||src==='local')list=(await DB.rangeInv(from,to)).map(i=>({...i,_devName:multiSrc()?(SYNC.cfg.device||'هذه الحاسبة'):''}));
+  let warn='';
+  if(src!=='local'){try{const r=await remoteInvoices(from,to,src==='all'?null:src);list=list.concat(r)}catch(e){warn=e.message||'تعذر الاتصال'}}
+  return {list,warn,multi:src!=='local'};
+}
 function renderInvoices(){
   const today=dayKey(new Date());INVF=INVF||{from:today,to:today,no:'',user:''};
   $('#view').innerHTML=`<div class="page"><div class="ph"><h2>📋 سجل الفواتير</h2></div>
    <div class="toolbar"><label class="f">من تاريخ<input type="date" id="f1" value="${INVF.from}"></label><label class="f">إلى تاريخ<input type="date" id="f2" value="${INVF.to}"></label>
+    ${srcSelect()}
     ${isAdmin()?`<label class="f">الكاشير<select id="fu"><option value="">الكل</option>${S.users.map(u=>`<option value="${u.id}" ${INVF.user===u.id?'selected':''}>${esc(u.name)}</option>`).join('')}</select></label>`:''}
     <label class="f">بحث برقم الفاتورة<input id="fno" type="text" inputmode="decimal" data-num="1" value="${esc(INVF.no)}" placeholder="مثال: 125"></label>
     <button class="btn gold" onclick="loadInvoices()">🔍 عرض</button><button class="btn" onclick="INVF=null;renderInvoices()">اليوم</button></div>
    <div class="stats" id="invStats"></div><div id="invTbl"></div></div>`;
   $('#fno').onkeydown=e=>{if(e.key==='Enter')loadInvoices()};
+  if($('#fsrc'))$('#fsrc').onchange=e=>{SRC=e.target.value;loadInvoices()};
   loadInvoices();
 }
 async function loadInvoices(){
   INVF={from:$('#f1').value,to:$('#f2').value,no:$('#fno').value.trim(),user:$('#fu')?$('#fu').value:''};
-  let list;
-  if(INVF.no){const i=await DB.getInv(+INVF.no);list=i?[i]:[]}else list=await DB.rangeInv(INVF.from||'0000',INVF.to||'9999');
+  $('#invTbl').innerHTML=`<div class="box mut" style="text-align:center;padding:40px">⏳ جاري تحميل الفواتير${multiSrc()&&SRC!=='local'?' من كل الحاسبات':''}...</div>`;
+  const g=await gatherInvoices(INVF.from||'0000',INVF.to||'9999');let list=g.list;
+  if(INVF.no){const n=+INVF.no;list=list.filter(i=>i.no===n);if(!g.multi||SRC==='all'){if(!list.some(i=>!i._dev)){const li=await DB.getInv(n);if(li)list.push({...li,_devName:multiSrc()?SYNC.cfg.device:''})}}}
   if(!isAdmin())list=list.filter(i=>i.user===ME.id);else if(INVF.user&&!INVF.no)list=list.filter(i=>i.user===INVF.user);
-  list.sort((a,b)=>b.no-a.no);
-  const ok=list.filter(i=>i.status!=='cancelled');
+  list.sort((a,b)=>b.ts-a.ts);INVLIST=list;
+  if(g.warn)toast('⚠️ تعذر جلب فواتير الحاسبات الأخرى: '+g.warn,'err');
+  const ok=list.filter(i=>i.status!=='cancelled');const showDev=g.multi;
   $('#invStats').innerHTML=`<div class="stat g"><small>إجمالي المبيعات</small><b>${money(ok.reduce((a,i)=>a+i.total,0))}</b></div>
    <div class="stat s"><small>عدد الفواتير</small><b>${ok.length}</b></div><div class="stat r"><small>الملغاة</small><b>${list.length-ok.length}</b></div>`;
-  $('#invTbl').innerHTML=list.length?`<table class="tbl"><thead><tr><th>رقم</th><th>التاريخ</th><th>الوقت</th><th>الكاشير</th><th>النوع</th><th>الأصناف</th><th>الإجمالي</th><th>الحالة</th><th></th></tr></thead><tbody>
-   ${list.map(i=>{const d=new Date(i.ts);return `<tr><td><b style="font-size:17px;color:var(--gold2)">${i.no}</b></td><td class="num">${dateStr(d)}</td><td class="num">${time12(d)}</td><td>${esc(i.userName)}</td>
+  $('#invTbl').innerHTML=list.length?`<table class="tbl"><thead><tr><th>رقم</th>${showDev?'<th>الحاسبة</th>':''}<th>التاريخ</th><th>الوقت</th><th>الكاشير</th><th>النوع</th><th>الأصناف</th><th>الإجمالي</th><th>الحالة</th><th></th></tr></thead><tbody>
+   ${list.map((i,k)=>{const d=new Date(i.ts);return `<tr><td><b style="font-size:17px;color:var(--gold2)">${i.no}</b></td>${showDev?`<td><span class="tag ${i._dev?'gd':'bl'}">${esc(i._devName||'')}</span></td>`:''}<td class="num">${dateStr(d)}</td><td class="num">${time12(d)}</td><td>${esc(i.userName)}</td>
     <td><span class="tag bl">${esc(i.type)}${i.table?' '+esc(i.table):''}</span></td><td>${i.items.length}</td><td class="num"><b>${money(i.total)}</b></td>
     <td>${i.status==='cancelled'?'<span class="tag no">ملغاة</span>':'<span class="tag ok">مدفوعة</span>'}</td>
-    <td style="white-space:nowrap"><button class="btn sm" onclick="viewInv(${i.no})">👁️ عرض</button> <button class="btn sm" onclick="reprint(${i.no})">🖨️</button>
-    ${isAdmin()&&i.status!=='cancelled'?` <button class="btn sm danger" onclick="cancelInv(${i.no})">إلغاء</button>`:''}</td></tr>`}).join('')}</tbody></table>`
+    <td style="white-space:nowrap"><button class="btn sm" onclick="viewInv(${k})">👁️ عرض</button> <button class="btn sm" onclick="reprint(${k})">🖨️</button>
+    ${isAdmin()&&!i._dev&&i.status!=='cancelled'?` <button class="btn sm danger" onclick="cancelInv(${i.no})">إلغاء</button>`:''}</td></tr>`}).join('')}</tbody></table>`
    :`<div class="box" style="text-align:center;padding:50px" class="mut">لا توجد فواتير في هذه الفترة</div>`;
 }
-async function viewInv(no){const i=await DB.getInv(no);if(!i)return;
-  modal(`<h3>فاتورة رقم ${i.no}</h3><div class="rcwrap">${receiptHTML(i)}</div>
+function viewInv(k){const i=INVLIST[k];if(!i)return;
+  modal(`<h3>فاتورة رقم ${i.no}${i._devName?` <span class="tag ${i._dev?'gd':'bl'}" style="font-size:13px">${esc(i._devName)}</span>`:''}</h3><div class="rcwrap">${receiptHTML(i)}</div>
    ${i.status==='cancelled'?`<p class="mut" style="margin-top:8px">ألغيت بواسطة ${esc(i.cancelBy||'')} — ${i.cancelTs?dateStr(new Date(i.cancelTs))+' '+time12(new Date(i.cancelTs)):''}</p>`:''}
-   <div class="mbtns"><button class="btn gold" onclick="reprint(${i.no})">🖨️ طباعة</button><button class="btn sea" onclick="reprint(${i.no},'kitchen')">🍳 نسخة مطبخ</button><button class="btn" onclick="closeModal()">إغلاق</button></div>`)}
-async function reprint(no,mode='customer'){const i=await DB.getInv(no);if(i){closeModal();printInvoice(i,mode)}}
+   <div class="mbtns"><button class="btn gold" onclick="reprint(${k})">🖨️ طباعة</button><button class="btn sea" onclick="reprint(${k},'kitchen')">🍳 نسخة مطبخ</button><button class="btn" onclick="closeModal()">إغلاق</button></div>`)}
+function reprint(k,mode='customer'){const i=INVLIST[k];if(i){closeModal();printInvoice(i,mode)}}
 async function cancelInv(no){if(!isAdmin())return;if(!await confirmBox(`هل تريد إلغاء الفاتورة رقم <b>${no}</b>؟<br><span class="mut">لن تحتسب ضمن المبيعات</span>`,'إلغاء الفاتورة'))return;
   const i=await DB.getInv(no);i.status='cancelled';i.cancelBy=ME.name;i.cancelTs=Date.now();await DB.putInv(i);toast('تم إلغاء الفاتورة','ok');loadInvoices()}
 
@@ -607,10 +624,12 @@ function renderReports(){
   const today=dayKey(new Date());REPF=REPF||{from:today,to:today};
   $('#view').innerHTML=`<div class="page"><div class="ph"><h2>📊 تقارير المبيعات</h2></div>
    <div class="toolbar"><label class="f">من تاريخ<input type="date" id="r1" value="${REPF.from}"></label><label class="f">إلى تاريخ<input type="date" id="r2" value="${REPF.to}"></label>
+    ${srcSelect()}
     <button class="btn gold" onclick="loadReport()">📊 عرض التقرير</button>
     <button class="btn" onclick="quickRange(0)">اليوم</button><button class="btn" onclick="quickRange(1)">أمس</button><button class="btn" onclick="quickRange(7)">آخر 7 أيام</button><button class="btn" onclick="quickRange(30)">آخر 30 يوم</button>
     <button class="btn sea" style="margin-right:auto" onclick="printReport()">🖨️ طباعة تقرير الإغلاق</button></div>
    <div id="rep"></div></div>`;
+  if($('#fsrc'))$('#fsrc').onchange=e=>{SRC=e.target.value;loadReport()};
   loadReport();
 }
 function quickRange(n){const t=new Date();let a=new Date(t),b=new Date(t);if(n===1){a.setDate(t.getDate()-1);b=new Date(a)}else if(n>1)a.setDate(t.getDate()-(n-1));
@@ -618,13 +637,17 @@ function quickRange(n){const t=new Date();let a=new Date(t),b=new Date(t);if(n==
 let REPDATA=null;
 async function loadReport(){
   REPF={from:$('#r1').value,to:$('#r2').value};
-  const list=await DB.rangeInv(REPF.from||'0000',REPF.to||'9999');const ok=list.filter(i=>i.status!=='cancelled'),can=list.filter(i=>i.status==='cancelled');
+  $('#rep').innerHTML=`<div class="box mut" style="text-align:center;padding:40px">⏳ جاري تجهيز التقرير${multiSrc()&&SRC!=='local'?' من كل الحاسبات':''}...</div>`;
+  const g=await gatherInvoices(REPF.from||'0000',REPF.to||'9999');const list=g.list;
+  if(g.warn)toast('⚠️ تعذر جلب مبيعات الحاسبات الأخرى: '+g.warn,'err');
+  const ok=list.filter(i=>i.status!=='cancelled'),can=list.filter(i=>i.status==='cancelled');
   const sum=(a,f)=>a.reduce((x,i)=>x+f(i),0);
   const grp=(arr,kf,vf)=>{const m={};arr.forEach(x=>{const k=kf(x);m[k]=m[k]||{n:0,t:0};m[k].n+=vf?vf(x).n:1;m[k].t+=vf?vf(x).t:x.total});return Object.entries(m).sort((a,b)=>b[1].t-a[1].t)};
   const lines=ok.flatMap(i=>i.items);
   const R={from:REPF.from,to:REPF.to,count:ok.length,total:sum(ok,i=>i.total),disc:sum(ok,i=>i.discount),del:sum(ok,i=>i.delivery),canN:can.length,canT:sum(can,i=>i.total),
+    byDev:g.multi?grp(ok,i=>i._devName||'—'):null,
     byUser:grp(ok,i=>i.userName),byType:grp(ok,i=>i.type),byDay:grp(ok,i=>i.day).sort((a,b)=>a[0]<b[0]?-1:1),
-    byCat:grp(lines,l=>l.catName||'بدون قسم',l=>({n:l.byWeight?l.qty:l.qty,t:l.total})),
+    byCat:grp(lines,l=>l.catName||'بدون قسم',l=>({n:l.qty,t:l.total})),
     items:grp(lines,l=>l.name,l=>({n:l.qty,t:l.total})).slice(0,25),wItems:new Set(lines.filter(l=>l.byWeight).map(l=>l.name))};
   REPDATA=R;
   const bars=(arr,lab=x=>x)=>{const mx=Math.max(1,...arr.map(a=>a[1].t));return `<div class="bars">${arr.map(([k,v])=>`<div class="bar"><span>${esc(lab(k))}</span><div class="t"><i style="width:${v.t/mx*100}%"></i></div><span>${fmt(v.t)}</span></div>`).join('')||'<p class="mut">لا توجد بيانات</p>'}</div>`};
@@ -632,6 +655,7 @@ async function loadReport(){
     <div class="stat g"><small>صافي المبيعات</small><b>${money(R.total)}</b></div><div class="stat s"><small>عدد الفواتير</small><b>${R.count}</b></div>
     <div class="stat"><small>متوسط الفاتورة</small><b>${money(R.count?R.total/R.count:0)}</b></div><div class="stat"><small>الخصومات</small><b>${money(R.disc)}</b></div>
     <div class="stat"><small>أجور التوصيل</small><b>${money(R.del)}</b></div><div class="stat r"><small>فواتير ملغاة</small><b>${R.canN} <small style="display:inline;font-size:13px">(${fmt(R.canT)})</small></b></div></div>
+   ${R.byDev?`<div class="box" style="margin-bottom:16px"><h3>🖥️ المبيعات حسب الحاسبة</h3>${bars(R.byDev)}</div>`:''}
    <div class="grid2"><div class="box"><h3>👥 المبيعات حسب الكاشير</h3>${bars(R.byUser)}</div><div class="box"><h3>🍽️ حسب نوع الطلب</h3>${bars(R.byType)}</div>
     <div class="box"><h3>📂 حسب القسم</h3>${bars(R.byCat)}</div><div class="box"><h3>📅 حسب اليوم</h3>${bars(R.byDay,k=>{const [y,m,d]=k.split('-');return `${d}/${m}/${y}`})}</div></div>
    <div class="box" style="margin-top:16px"><h3>🏆 الأصناف الأكثر مبيعاً</h3><table class="tbl"><thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>المبلغ</th></tr></thead><tbody>
@@ -642,6 +666,7 @@ function printReport(){if(!REPDATA)return;const R=REPDATA,s=S.settings,d=new Dat
    <table class="rc-meta"><tr><td>من</td><td>${f(R.from)}</td></tr><tr><td>إلى</td><td>${f(R.to)}</td></tr><tr><td>طُبع</td><td>${dateStr(d)} ${time12(d)}</td></tr><tr><td>بواسطة</td><td>${esc(ME.name)}</td></tr></table>
    <table class="rc-tot"><tr><td>عدد الفواتير</td><td>${R.count}</td></tr><tr><td>الخصومات</td><td>${fmt(R.disc)}</td></tr><tr><td>أجور التوصيل</td><td>${fmt(R.del)}</td></tr><tr><td>الملغاة</td><td>${R.canN} (${fmt(R.canT)})</td></tr>
    <tr class="rc-grand"><td>صافي المبيعات</td><td>${fmt(R.total)} ${esc(s.currency)}</td></tr></table>
+   ${R.byDev?`<table class="rc-items"><thead><tr><th>الحاسبة</th><th class="n">فواتير</th><th class="n">المبلغ</th></tr></thead><tbody>${R.byDev.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${v.n}</td><td class="n">${fmt(v.t)}</td></tr>`).join('')}</tbody></table>`:''}
    <table class="rc-items"><thead><tr><th>الكاشير</th><th class="n">فواتير</th><th class="n">المبلغ</th></tr></thead><tbody>${R.byUser.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${v.n}</td><td class="n">${fmt(v.t)}</td></tr>`).join('')}</tbody></table>
    <table class="rc-items"><thead><tr><th>القسم</th><th class="n">المبلغ</th></tr></thead><tbody>${R.byCat.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${fmt(v.t)}</td></tr>`).join('')}</tbody></table>
    <table class="rc-items"><thead><tr><th>الصنف</th><th class="n">الكمية</th><th class="n">المبلغ</th></tr></thead><tbody>${R.items.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${R.wItems.has(k)?r3(v.n)+'كغ':v.n}</td><td class="n">${fmt(v.t)}</td></tr>`).join('')}</tbody></table>
@@ -849,10 +874,12 @@ const setSig=()=>JSON.stringify(SYNC_SET.map(k=>S.settings&&S.settings[k]));
 function catChanged(){if(SYNC.suspend||!SYNC.cfg)return;SYNC.st.localAt=Date.now();DB.set('syncState',SYNC.st);clearTimeout(SYNC.pushT);SYNC.pushT=setTimeout(()=>syncNow('auto'),4000)}
 async function syncMarkLocal(){if(!SYNC.cfg)return;SYNC.st.localAt=Date.now();await DB.set('syncState',SYNC.st)}
 async function syncInit(){
+  await devInit();
   SYNC.cfg=await DB.get('syncCfg')||null;SYNC.st=Object.assign(SYNC.st,await DB.get('syncState')||{});
   if(!SYNC.cfg||!SYNC.cfg.token||!SYNC.cfg.auto)return;
   clearInterval(SYNC.loopT);SYNC.loopT=setInterval(()=>syncNow('auto'),60000);
   setTimeout(()=>syncNow('auto'),1500);
+  setTimeout(()=>{salesInitAll();salesPush()},4000);
   window.addEventListener('online',()=>syncNow('auto'));
 }
 function b64enc(str){const b=new TextEncoder().encode(str);let s='';for(let i=0;i<b.length;i+=0x8000)s+=String.fromCharCode.apply(null,b.subarray(i,i+0x8000));return btoa(s)}
@@ -919,10 +946,10 @@ function updSyncStatus(busy){const el=$('#syst');if(!el)return;if(!SYNC.cfg||!SY
   el.classList.remove('hidden');el.className='bkst'+(SYNC.st.err?' bad':'');
   el.innerHTML=busy?'<i style="background:var(--gold);box-shadow:0 0 8px var(--gold)"></i>جاري المزامنة...':SYNC.st.err?'<i></i>المزامنة متوقفة':`<i></i>🔄 متزامن ${SYNC.st.lastOk?time12(new Date(SYNC.st.lastOk)):'—'}`}
 function syncInfoHTML(){const t=x=>x?dateStr(new Date(x))+' — '+time12(new Date(x),true):'—';
-  return `<div style="line-height:2">آخر مزامنة ناجحة: <b style="color:#86efac">${t(SYNC.st.lastOk)}</b><br>آخر تعديل محلي: <b>${t(SYNC.st.localAt)}</b> — نسخة GitHub: <b>${t(SYNC.st.remoteAt)}</b>${SYNC.st.err?`<br><b style="color:#fca5a5">⚠️ ${esc(SYNC.st.err)}</b>`:''}</div>`}
+  return `<div style="line-height:2">آخر مزامنة ناجحة: <b style="color:#86efac">${t(SYNC.st.lastOk)}</b><br>آخر تعديل محلي: <b>${t(SYNC.st.localAt)}</b> — نسخة GitHub: <b>${t(SYNC.st.remoteAt)}</b><br>آخر رفع للمبيعات: <b>${t(SYNC.st.salesAt)}</b>${(SYNC.st.dirty||[]).length?` <span class="mut">(بانتظار الرفع: ${SYNC.st.dirty.join('، ')})</span>`:''}${SYNC.st.err?`<br><b style="color:#fca5a5">⚠️ ${esc(SYNC.st.err)}</b>`:''}</div>`}
 function admSync(){const c=SYNC.cfg||{repo:'abdallapsx/abu-sajjad-data',token:'',device:'',auto:true};
   $('#adm').innerHTML=`<div class="grid2"><div class="box"><h3>🔄 المزامنة بين الحاسبات عبر GitHub</h3>
-   <p class="mut" style="line-height:1.8;margin-bottom:12px">أي تعديل على <b>الأقسام، الأصناف، الأسعار، الصور، المستخدمين، ومعلومات المطعم</b> في أي حاسبة يُرفع إلى GitHub ويصل لباقي الحاسبات خلال دقيقة. <br>الفواتير ورقم الفاتورة تبقى خاصة بكل حاسبة.</p>
+   <p class="mut" style="line-height:1.8;margin-bottom:12px">أي تعديل على <b>الأقسام، الأصناف، الأسعار، الصور، المستخدمين، ومعلومات المطعم</b> في أي حاسبة يُرفع إلى GitHub ويصل لباقي الحاسبات خلال دقيقة. <br>📊 <b>المبيعات:</b> كل حاسبة ترفع فواتيرها، والمدير يشوف فواتير وتقارير <b>كل الحاسبات</b> من أي حاسبة (من صفحة الفواتير والتقارير ← اختيار الحاسبة).</p>
    <div class="form"><label class="f full">المستودع (يجب أن يكون Private)<input id="syR" value="${esc(c.repo)}" dir="ltr" style="text-align:left" autocomplete="off" spellcheck="false"></label>
    <label class="f full">التوكن (Token)<input id="syT" class="pw" value="${esc(c.token)}" dir="ltr" style="text-align:left" autocomplete="off" spellcheck="false" placeholder="github_pat_..."></label>
    <label class="f full">اسم هذه الحاسبة<input id="syD" value="${esc(c.device)}" placeholder="مثال: الحاسبة الرئيسية / حاسبة الكاشير"></label>
@@ -960,7 +987,59 @@ async function syncConnect(){
   }catch(e){toast('⚠️ '+e.message,'err')}
 }
 async function syncDisconnect(){if(!await confirmBox('فصل المزامنة في هذه الحاسبة؟ (البيانات تبقى كما هي)','فصل'))return;
-  SYNC.cfg=null;clearInterval(SYNC.loopT);await DB.set('syncCfg',null);SYNC.st={localAt:0,remoteAt:0,sha:'',lastOk:0,err:''};await DB.set('syncState',SYNC.st);renderShell()}
+  SYNC.cfg=null;clearInterval(SYNC.loopT);await DB.set('syncCfg',null);SYNC.st={localAt:0,remoteAt:0,sha:'',lastOk:0,err:''};await DB.set('syncState',SYNC.st);SRC=null;renderShell()}
+
+/* ---- مزامنة المبيعات: كل حاسبة ترفع فواتيرها شهرياً إلى sales/<رقم الحاسبة>/<الشهر>.json ---- */
+['addInv','putInv'].forEach(k=>{const f=DB[k];DB[k]=async v=>{const r=await f(v);salesDirty(v.day);return r}});
+async function devInit(){let id=await DB.get('deviceId');if(!id){id='d'+uid();await DB.set('deviceId',id)}SYNC.devId=id;SYNC.knownDevs=await DB.get('knownDevs')||{}}
+function salesDirty(day){if(!SYNC.cfg||!SYNC.cfg.token||!day)return;const m=day.slice(0,7);SYNC.st.dirty=SYNC.st.dirty||[];if(!SYNC.st.dirty.includes(m))SYNC.st.dirty.push(m);
+  DB.set('syncState',SYNC.st);clearTimeout(SYNC.salesT);SYNC.salesT=setTimeout(salesPush,8000)}
+async function ghPutJSON(path,doc,message){
+  const content=b64enc(JSON.stringify(doc));
+  for(let a=0;a<3;a++){
+    const m=await gh('GET',`/repos/${SYNC.cfg.repo}/contents/${path}`);
+    if(!m.ok&&m.status!==404)throw new Error(ghErr(m));
+    const body={message,content};if(m.ok&&m.j&&m.j.sha)body.sha=m.j.sha;
+    const r=await gh('PUT',`/repos/${SYNC.cfg.repo}/contents/${path}`,body);
+    if(r.ok)return true;if(r.status!==409&&r.status!==422)throw new Error(ghErr(r));
+  }
+  throw new Error('تعارض أثناء رفع المبيعات');
+}
+let salesBusy=false;
+async function salesPush(){
+  if(!SYNC.cfg||!SYNC.cfg.token||salesBusy)return;const months=[...(SYNC.st.dirty||[])];if(!months.length)return;salesBusy=true;
+  try{for(const m of months){
+      const inv=await DB.rangeInv(m+'-01',m+'-31');
+      await ghPutJSON(`sales/${SYNC.devId}/${m}.json`,{app:'AbuSajjadPOS-sales',v:1,device:{id:SYNC.devId,name:SYNC.cfg.device||''},month:m,at:Date.now(),invoices:inv},
+        `مبيعات ${SYNC.cfg.device||''} — ${m} (${inv.length} فاتورة)`);
+      SYNC.st.dirty=(SYNC.st.dirty||[]).filter(x=>x!==m);SYNC.st.salesAt=Date.now();await DB.set('syncState',SYNC.st)}
+    SYNC.st.err='';}
+  catch(e){SYNC.st.err='المبيعات: '+(e.message||'تعذر الاتصال');logErr('SALES '+SYNC.st.err);clearTimeout(SYNC.salesT);SYNC.salesT=setTimeout(salesPush,120000)}
+  finally{salesBusy=false;updSyncStatus()}
+}
+async function salesInitAll(){ // أول ربط: رفع كل الأشهر السابقة
+  if(SYNC.st.salesInit)return;const all=await DB.allInv();const ms=[...new Set(all.map(i=>i.day.slice(0,7)))];
+  SYNC.st.dirty=[...new Set([...(SYNC.st.dirty||[]),...ms])];SYNC.st.salesInit=true;await DB.set('syncState',SYNC.st);salesPush()}
+async function ghList(path){const r=await gh('GET',`/repos/${SYNC.cfg.repo}/contents/${path}`);if(r.status===404)return [];if(!r.ok)throw new Error(ghErr(r));return Array.isArray(r.j)?r.j:[]}
+const RCACHE={};
+function monthsBetween(a,b){const out=[];let [y,m]=a.slice(0,7).split('-').map(Number);const [y2,m2]=b.slice(0,7).split('-').map(Number);let g=0;
+  while((y<y2||(y===y2&&m<=m2))&&g++<240){out.push(`${y}-${pad(m)}`);m++;if(m>12){m=1;y++}}return out}
+async function remoteInvoices(from,to,only){
+  const months=monthsBetween(from==='0000'?'2020-01-01':from,to==='9999'?dayKey(new Date()):to);
+  const devs=(await ghList('sales')).filter(d=>d.type==='dir'&&d.name!==SYNC.devId&&(!only||d.name===only));
+  const out=[];let changed=false;
+  await Promise.all(devs.map(async d=>{
+    const files=(await ghList('sales/'+d.name)).filter(f=>months.includes(f.name.replace(/\.json$/,'')));
+    await Promise.all(files.map(async f=>{
+      let c=RCACHE[f.path];
+      if(!c||c.sha!==f.sha){const b=await gh('GET',`/repos/${SYNC.cfg.repo}/git/blobs/${f.sha}`);if(!b.ok)throw new Error(ghErr(b));c=RCACHE[f.path]={sha:f.sha,doc:JSON.parse(b64dec(b.j.content))}}
+      const nm=c.doc.device&&c.doc.device.name||d.name;if(SYNC.knownDevs[d.name]!==nm){SYNC.knownDevs[d.name]=nm;changed=true}
+      c.doc.invoices.forEach(i=>{if(i.day>=from&&i.day<=to)out.push({...i,_dev:d.name,_devName:nm})});
+    }));
+  }));
+  if(changed)DB.set('knownDevs',SYNC.knownDevs);
+  return out;
+}
 
 /* ---------------- On-screen keyboard (كيبورد الشاشة) ---------------- */
 const VK={el:null,t:null,lang:'ar',shift:false,auto:localStorage.getItem('vkAuto')!=='0'};
