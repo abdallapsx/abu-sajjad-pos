@@ -187,6 +187,7 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;background:var(--
 .vk-num{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;max-width:520px;margin:0 auto}
 .vk-num .vk-k{max-width:none;height:56px;font-size:24px}
 body.kbon .modal-wrap{padding-bottom:310px}
+body.kbon .login{place-items:start center;padding-top:14px}
 body.kbon .modal{max-height:calc(100vh - 330px)}
 body.kbon #toasts{bottom:auto;top:80px;left:20px;transform:none;align-items:flex-start}
 body.kbon .page{padding-bottom:330px}
@@ -368,7 +369,7 @@ async function renderLogin(){
    <div class="lg">${S.settings.logo?`<img src="${S.settings.logo}">`:'🐟'}</div>
    <h1>${esc(S.settings.name)}</h1><div class="sl">نظام الكاشير وإدارة المبيعات</div>
    <form id="lf"><label class="f">اسم المستخدم<input id="lu" autofocus autocomplete="off"></label>
-   <label class="f">كلمة المرور<input id="lp" type="password"></label>
+   <label class="f">كلمة المرور<input id="lp" type="password" autocomplete="off"></label>
    <button class="btn gold" style="padding:13px;font-size:17px;margin-top:6px">🔐 تسجيل الدخول</button>
    ${def?`<div class="hint">الدخول الأول: <b>admin</b> / <b>admin123</b> — غيّرها من الإدارة</div>`:''}</form>
    <div class="lclock" id="lclk"></div></div></div>`;
@@ -719,9 +720,9 @@ function admUsers(){
 function editUser(id){const u=id?{...S.users.find(x=>x.id===id)}:{id:uid(),name:'',username:'',pass:'',role:'cashier',active:true};
   modal(`<h3>${id?'تعديل موظف':'موظف جديد'}</h3><div class="form">
    <label class="f">اسم الموظف<input id="uN" value="${esc(u.name)}" autofocus></label>
-   <label class="f">اسم المستخدم (يوزر)<input id="uU" value="${esc(u.username)}" dir="ltr"></label>
-   <label class="f">كلمة المرور ${id?'<small>(اتركها فارغة لعدم التغيير)</small>':''}<input id="uP" type="password" dir="ltr"></label>
-   <label class="f">تأكيد كلمة المرور<input id="uP2" type="password" dir="ltr"></label>
+   <label class="f">اسم المستخدم (يوزر)<input id="uU" value="${esc(u.username)}" dir="ltr" autocomplete="off"></label>
+   <label class="f">كلمة المرور ${id?'<small>(اتركها فارغة لعدم التغيير)</small>':''}<input id="uP" type="password" dir="ltr" autocomplete="new-password"></label>
+   <label class="f">تأكيد كلمة المرور<input id="uP2" type="password" dir="ltr" autocomplete="new-password"></label>
    <label class="f">الصلاحية<select id="uR"><option value="cashier" ${u.role==='cashier'?'selected':''}>كاشير</option><option value="admin" ${u.role==='admin'?'selected':''}>مدير</option></select></label>
    <label class="chk" style="margin-top:22px"><input type="checkbox" id="uA" ${u.active?'checked':''} ${u.id===ME.id?'disabled':''}> الحساب فعال</label></div>
    <div class="mbtns"><button class="btn gold" id="uS">💾 حفظ</button><button class="btn" onclick="closeModal()">إلغاء</button></div>`);
@@ -877,8 +878,13 @@ function vkPress(k){
   if(VK.shift&&VK.lang==='en'){VK.shift=false}
   function ins(t){const s=el.selectionStart??el.value.length,e=el.selectionEnd??s;if(el.maxLength>0&&el.value.length-(e-s)+t.length>el.maxLength)return;el.setRangeText(t,s,e,'end');fire();vkRender()}
 }
-document.addEventListener('focusin',e=>{if(VK.auto&&vkOK(e.target))vkShow(e.target);else if(VK.t&&!vkOK(e.target))vkHide()});
-document.addEventListener('focusout',()=>setTimeout(()=>{const a=document.activeElement;if(VK.t&&!vkOK(a))vkHide()},120));
+document.addEventListener('focusin',e=>{if(VK.auto&&vkOK(e.target))vkShow(e.target)});
+// الإخفاء بعد اكتمال الضغطة حتى لا تتحرك الأزرار تحت إصبع المستخدم
+let vkPtr=false;
+document.addEventListener('pointerdown',e=>{if(!(VK.el&&VK.el.contains(e.target)))vkPtr=true},true);
+document.addEventListener('pointerup',()=>setTimeout(()=>{vkPtr=false},0),true);
+document.addEventListener('click',()=>setTimeout(()=>{if(VK.t&&!vkOK(document.activeElement))vkHide()},0),true);
+document.addEventListener('focusout',()=>setTimeout(function chk(){if(vkPtr)return setTimeout(chk,150);if(VK.t&&!vkOK(document.activeElement))vkHide()},400));
 document.addEventListener('input',e=>{const t=e.target;if(t.dataset&&t.dataset.num){const c=t.value.replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^0-9.]/g,'').replace(/(\..*)\./g,'$1');if(c!==t.value)t.value=c}
   if(VK.t===t&&e.isTrusted)vkRender()},true);
 
